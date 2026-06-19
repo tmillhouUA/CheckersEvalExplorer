@@ -6,10 +6,12 @@
 // main thread tallies outcomes, smooths the cumulative shares, and draws the
 // stacked-proportion plot.
 //
-// Determinism is preserved regardless of worker count: each game's seed and
-// color assignment come from its global game index, and results are applied in
-// index order (buffered if they arrive out of order), so the graph is identical
-// to the single-threaded version.
+// The win/draw/loss TOTALS are deterministic regardless of worker count: each
+// game's seed and color assignment come from its global game index, so the same
+// N games are played whatever the pool size.  Results are applied in COMPLETION
+// order (not buffered into index order) -- this never affects the totals, but it
+// does make the exact wiggle of the smoothed curve timing-dependent, so the
+// curve is not bit-identical run to run.  (See applyGameResult / onGameResult.)
 
 // ------------------------------------------------------------
 // Layout: keep the center panel square (driven by viewer height).
@@ -81,6 +83,8 @@ const LOGS_CAP = 50;                 // keep only the most recent N runs
 const LOGS_SAVE_THROTTLE_MS = 1500;  // trailing disk-write interval during a run
 let logs = [];                 // loaded in init(); newest entries at the end
 let currentRunLogId = null;    // id of the in-progress entry, or null when idle
+let currentRunLogEntry = null; // cached reference to that entry (avoids a per-game
+                               //   logs.find); set/cleared alongside the id
 let logsSaveTimer = 0;         // setTimeout handle for the throttled save
 let logsDirty = false;         // a throttled write is pending
 
@@ -402,10 +406,13 @@ function panelState(prefix) {
   return s;
 }
 
-// Apply a {key: number} state object to a panel (missing keys keep default).
+// Apply a {key: number} state object to a panel.  Missing or non-numeric keys
+// fall back to the row default, so a hand-edited or malformed JSON file can't
+// push NaN/empty into a slider (setRow clamps the range but not the type).
 function applyPanelState(prefix, state) {
   for (const row of EVAL_ROWS) {
-    const v = (state && state[row.key] != null) ? state[row.key] : row.def;
+    const raw = state ? Number(state[row.key]) : NaN;
+    const v = Number.isFinite(raw) ? raw : row.def;
     setRow(`${prefix}_${row.key}`, row, v);
   }
 }
@@ -563,8 +570,11 @@ function flushLogsSave() {  // immediate authoritative write (finalize / pause)
 
 // ---- entry lifecycle ----
 
+// The in-progress entry, by cached reference.  The current entry is always the
+// newest (last) element and is never spliced or deleted mid-run, so the cached
+// reference stays valid until logFinalize clears it.
 function logFindCurrent() {
-  return currentRunLogId ? logs.find(e => e.id === currentRunLogId) : null;
+  return currentRunLogEntry;
 }
 
 // Copy the live run tallies into an entry (in memory; no disk write here).
@@ -595,6 +605,7 @@ function logCreateEntry() {
   logs.push(entry);
   if (logs.length > LOGS_CAP) logs.splice(0, logs.length - LOGS_CAP);
   currentRunLogId = entry.id;
+  currentRunLogEntry = entry;
   saveLogs();
   renderLogs();
   scrollLogsToBottom();  // bring the new run into view (console-style)
@@ -616,6 +627,7 @@ function logFinalize(status) {
   logWriteTallies(entry);
   entry.status = status;  // 'done' | 'stopped'
   currentRunLogId = null;
+  currentRunLogEntry = null;
   flushLogsSave();
   renderLogs();
 }
@@ -934,6 +946,7 @@ function pauseRun() {
   logUpdateCurrent();  // flush current numbers in case the page is refreshed while paused
   document.getElementById('startPauseBtn').textContent = 'Start';
   stopPlotLoop();
+  updateCounters();  // exact paused readout (the throttled loop has now stopped)
 }
 
 // Stop: end the run, keep results on screen, re-enable setup.  Next Start is
@@ -964,18 +977,27 @@ function finishRun() {
   logFinalize('done');
 }
 
-// Enable/disable all setup controls (everything except Play/Pause, Stop, and
-// the read-only Save buttons, which are safe mid-run).
-function setControlsEnabled(enabled) {
-  const ids = ['nGamesInput', 'rolloutChk', 'coresSlider',
-               'ef1ResetAll', 'ef2ResetAll',
-               'ef1Copy', 'ef2Copy', 'ef1Load', 'ef2Load'];
+// Enable/disable every eval-panel control: the per-row sliders + number boxes,
+// the dynamically-created per-row reset (↺) buttons, and the title-bar
+// Reset-all / Copy / Load tools.  Shared by the Test-run lock
+// (setControlsEnabled) and the Play lock (setEvalPanelsEnabled) so the two can't
+// drift out of sync.  Save is intentionally excluded -- it's read-only and safe
+// at any time.
+function setEvalControlsDisabled(disabled) {
+  const ids = ['ef1ResetAll', 'ef2ResetAll', 'ef1Copy', 'ef2Copy', 'ef1Load', 'ef2Load'];
   for (const prefix of ['ef1', 'ef2'])
     for (const row of EVAL_ROWS) ids.push(`${prefix}_${row.key}`, `${prefix}_${row.key}_num`);
-  for (const id of ids) document.getElementById(id).disabled = !enabled;
-  // Per-row reset buttons (created dynamically) — toggle them too.
-  for (const btn of document.querySelectorAll('.rowResetBtn'))
-    btn.disabled = !enabled;
+  for (const id of ids) { const el = document.getElementById(id); if (el) el.disabled = disabled; }
+  for (const btn of document.querySelectorAll('.rowResetBtn')) btn.disabled = disabled;
+}
+
+// Enable/disable all setup controls (everything except Play/Pause, Stop, and
+// the read-only Save buttons, which are safe mid-run).  The eval panels lock
+// together with the setup-only controls.
+function setControlsEnabled(enabled) {
+  for (const id of ['nGamesInput', 'rolloutChk', 'coresSlider'])
+    document.getElementById(id).disabled = !enabled;
+  setEvalControlsDisabled(!enabled);
   refreshLogApplyLock();  // the Logs tab's "-> EF" buttons also change the EFs
 }
 
@@ -1033,7 +1055,11 @@ function dispatchTo(workerIdx) {
   if (!running || nextGameIndex >= targetGames) return;  // run done / capped
   const dispatchIndex = nextGameIndex++;
   const swapColors = dispatchIndex % 2;                 // alternate starting color
-  const seed = (dispatchIndex + 1) * 2654435761 >>> 0;  // distinct opening per game
+  // Distinct, well-scattered opening per game: multiply the index by Knuth's
+  // multiplicative-hash constant (~2^32 / golden ratio) and keep the low 32 bits
+  // (>>> 0), so consecutive indices map to far-apart seeds instead of adjacent
+  // ones (which would give near-identical RNG streams).
+  const seed = (dispatchIndex + 1) * 2654435761 >>> 0;
 
   workerBusy[workerIdx] = true;
   workers[workerIdx].postMessage({
@@ -1064,9 +1090,11 @@ function dispatchTo(workerIdx) {
 // which does not matter for reading the proportions.
 function onGameResult(result) {
   applyGameResult(result);
-  // Cheap text counters update immediately; the canvas redraw is paced by the
-  // wall-clock plot loop (below).
-  updateCounters();
+  // Both the text counters and the canvas redraw are paced by the wall-clock
+  // plot loop (~10/sec), not done per game -- at a high completion rate (low
+  // depth, full worker pool) per-game DOM writes are wasteful.  The tallies
+  // themselves are already current (applyGameResult, above); only the on-screen
+  // refresh is throttled.
   logUpdateCurrent();  // keep the in-progress log entry fresh (throttled disk write)
 }
 
@@ -1096,6 +1124,7 @@ function stopPlotLoop() {
 function plotTick(now) {
   if (now - lastPlotTime >= PLOT_INTERVAL_MS) {
     lastPlotTime = now;
+    updateCounters();  // refresh the text counters at the same ~10/sec cadence
     drawPlot();
   }
   if (running) plotRafId = requestAnimationFrame(plotTick);
@@ -1761,11 +1790,13 @@ function onEvalEdited() {
 // resets, and the reset-all/copy/load tools).  Save stays available (read-only).
 // Locked while a game runs; unlocked at the opening and while paused.
 function setEvalPanelsEnabled(enabled) {
-  const ids = ['ef1ResetAll', 'ef2ResetAll', 'ef1Copy', 'ef2Copy', 'ef1Load', 'ef2Load'];
-  for (const prefix of ['ef1', 'ef2'])
-    for (const row of EVAL_ROWS) ids.push(`${prefix}_${row.key}`, `${prefix}_${row.key}_num`);
-  for (const id of ids) { const el = document.getElementById(id); if (el) el.disabled = !enabled; }
-  for (const btn of document.querySelectorAll('.rowResetBtn')) btn.disabled = !enabled;
+  // A paused/active Test run also owns the EFs (it snapshotted them at Start and
+  // will resume from that snapshot).  Never re-enable the panels while it does,
+  // even if a Play pause asks to -- otherwise the two togglers disagree and a
+  // slider edit here would be silently ignored on the Test run's resume.  This
+  // keeps efsLocked() the single source of truth for "EFs are editable".
+  const efEnabled = enabled && !running && !paused;
+  setEvalControlsDisabled(!efEnabled);
   refreshLogApplyLock();  // the Logs tab's "-> EF" buttons also change the EFs
 }
 
@@ -2109,18 +2140,25 @@ function endGame(status) {
 
 // ---- control handlers ----
 
+// Start a fresh game from the opening: lock the eval panels + seat dropdowns and
+// hand off the first turn.  autoRun=true is continuous play (the Play button);
+// autoRun=false is a single step (the Step button), which pauses itself after
+// one ply via finishMove.
+function beginPlay(autoRun) {
+  playStarted = true; playPaused = false; playAutoRun = autoRun;
+  setEvalPanelsEnabled(false);  // lock eval while playing
+  setSeatLock(true);
+  setPlayButtons();
+  advanceTurn();
+}
+
 // Play / Pause / Resume / Play Again, for both agent and human games.
 function onPlayStart() {
   if (!playReady) return;
   if (playState === 'over') { onPlayReset(); return; }  // Play Again
 
   if (!playStarted) {
-    // Begin a new game (continuous for agents; human-paced for human games).
-    playStarted = true; playPaused = false; playAutoRun = true;
-    setEvalPanelsEnabled(false);  // lock eval while playing
-    setSeatLock(true);
-    setPlayButtons();
-    advanceTurn();
+    beginPlay(true);  // continuous for agents; human-paced for human games
   } else if (playPaused) {
     resumePlay();
   } else {
@@ -2132,11 +2170,7 @@ function onPlayStart() {
 function onPlayStep() {
   if (!playReady || !isAgentVsAgent() || playState === 'busy' || playState === 'over') return;
   if (playStarted && !playPaused) return;  // can't step while running
-  playStarted = true; playPaused = false; playAutoRun = false;
-  setEvalPanelsEnabled(false);
-  setSeatLock(true);
-  setPlayButtons();
-  advanceTurn();
+  beginPlay(false);  // single-step: finishMove pauses after this one ply
 }
 
 function onPlayReset() {

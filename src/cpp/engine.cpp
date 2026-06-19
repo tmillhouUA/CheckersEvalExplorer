@@ -385,9 +385,29 @@ static double eval_weighted(const Board& b, Side side, const Weights& w) {
 // Minimax with alpha-beta (negamax framing)
 // ---------------------------------------------------------------------------
 //
-// Returns the value of the position from `side`'s perspective.
-// A side with no legal moves loses: value -1e9 (worse than any ratio).
+// Minimax assumes optimal play by both sides: the side to move picks the move
+// that MAXIMIZES its outcome, assuming the opponent then replies to MINIMIZE it,
+// alternating down to the depth limit.  Rather than write separate "max" and
+// "min" routines, we use the NEGAMAX form: a position is always scored from the
+// perspective of the side to move, and the opponent's best reply is simply the
+// NEGATION of our own search one ply deeper (their gain is our loss).  So a
+// single routine serves both players, and "minimize" becomes "negate and
+// maximize" -- that is the meaning of the `-negamax(...)` at the recursive call.
+//
+// Alpha-beta pruning makes this exact search much cheaper without changing the
+// result.  `alpha` is the best score the side to move has already guaranteed
+// itself somewhere; `beta` is the best the OPPONENT (one level up) will allow.
+// Once a move proves at least as good as `beta`, the opponent would never let us
+// reach this position -- it already has a reply at least this good elsewhere --
+// so we stop examining the remaining moves here (the "beta cutoff").
+//
+// Returns the value of the position from `side`'s perspective.  A side with no
+// legal moves loses: value -WIN, more negative than any heuristic eval can be.
 
+// A forced win/loss must outweigh any heuristic score, so WIN is set far above
+// the largest magnitude eval_weighted can produce (a few hundred at most).  The
+// running `best` is seeded at -WIN*2 -- below even a loss -- so the first real
+// move always replaces it.
 static const double WIN = 1e9;
 
 // Quiescence search (captures-only) used at the depth limit so the static eval
@@ -396,6 +416,11 @@ static const double WIN = 1e9;
 // side to move has a capture available (mandatory capture => its legal moves
 // are jumps); when no capture is available (quiet) or the budget is spent, we
 // apply the static eval.  Alpha-beta still prunes.
+//
+// Unlike textbook quiescence, there is no "stand-pat" option (taking the static
+// eval as a floor before trying captures): in checkers a capture is MANDATORY,
+// so the side to move cannot decline to capture -- there is nothing to stand pat
+// on.  When captures exist we must play one; when none exist we just evaluate.
 static double quiesce(const Board& b, Side side, int qbudget,
                       double alpha, double beta, const Weights& w) {
   std::vector<Move> moves;
@@ -436,8 +461,12 @@ static double negamax(const Board& b, Side side, int depth,
     return quiesce(b, side, qbudget, alpha, beta, w);
   }
 
-  // Move ordering: score each child by the same weighted eval (from the mover's
-  // perspective), best first.
+  // Move ordering: search the most promising moves first.  Alpha-beta prunes
+  // well only when good moves come early -- with ideal ordering the cost drops
+  // from ~b^depth toward ~b^(depth/2), so the search reaches nearly twice as
+  // deep for the same work.  Ordering never changes the RESULT, only the speed.
+  // Each child is scored by the same weighted eval (from the mover's
+  // perspective) and sorted best-first.
   std::vector<std::pair<double, int>> ordered;
   ordered.reserve(moves.size());
   std::vector<Board> childs(moves.size());
@@ -461,10 +490,12 @@ static double negamax(const Board& b, Side side, int depth,
   double best = -WIN * 2;
   for (auto& pr : ordered) {
     int i = pr.second;
+    // Negamax: the opponent's best reply, negated, is this move's value to us;
+    // the window flips to (-beta, -alpha) because their bounds are ours mirrored.
     double val = -negamax(childs[i], other, depth - 1, -beta, -alpha, w, qbudget);
     if (val > best) best = val;
-    if (best > alpha) alpha = best;
-    if (alpha >= beta) break;  // beta cutoff
+    if (best > alpha) alpha = best;          // raise our own guaranteed floor
+    if (alpha >= beta) break;  // beta cutoff: the opponent won't allow this line
   }
   return best;
 }
@@ -498,7 +529,8 @@ static int pick_move(const Board& b, Side side, int mode, int depth, int qbudget
   const int DEPTH = depth;
   Side other = (side == RED) ? BLACK : RED;
 
-  // Order root moves by the same weighted eval.
+  // Order root moves by the same weighted eval (see negamax for why ordering
+  // speeds the search), but with a tie-shuffle described below.
   std::vector<std::pair<double, int>> ordered;
   std::vector<Board> childs(moves.size());
   for (size_t i = 0; i < moves.size(); ++i) {
@@ -679,7 +711,12 @@ static int run_game(int modeRed, int modeBlack, int depthRed, int depthBlack,
 
 static Board g_ig_board;
 static Side  g_ig_side = RED;
-static Rng   g_ig_rng(0x12345678u);   // only used for random/tie cases
+// Used only for random/tie cases.  Deliberately NOT reseeded in ig_reset(): the
+// Play tab keeps one continuous RNG stream so successive games (and tie-broken
+// agent moves) vary from one another, which is desirable for hands-on
+// exploration.  This contrasts with the Test tab, where each game seeds its own
+// Rng from its game index for reproducibility.
+static Rng   g_ig_rng(0x12345678u);
 static int   g_ig_status = 0;         // see ig_pick return codes
 
 // The move just played by ig_pick, exposed square-by-square for animation.
@@ -695,6 +732,34 @@ static int g_ig_promoted = 0;         // 1 if the move ended in a promotion
 // Legal moves for the side to move, enumerated by ig_gen() for the host (used
 // for human input on the Play tab).  ig_apply(i) applies the i-th of these.
 static std::vector<Move> g_ig_gen;
+
+// After a move flips the side to move, decide a win immediately if the new side
+// to move has no legal moves (annihilation or blockade).  Without this, that
+// loss is only discovered on the NEXT ig_pick/ig_gen, so the result would lag a
+// half-ply behind the deciding move on the Play tab.  No-op if the game already
+// ended this ply (e.g. a no-progress draw was just set).
+static void ig_detect_terminal() {
+  if (g_ig_status != 0) return;
+  std::vector<Move> moves;
+  generate_moves(g_ig_board, g_ig_side, moves);
+  if (moves.empty())
+    g_ig_status = (g_ig_side == RED) ? 2 : 1;  // side to move can't move -> other wins
+}
+
+// Record the move just played into the g_ig_* accessor globals so the host can
+// animate it: the path squares, the captured squares, and the promotion flag,
+// with the buffer copies clamped to their 16-entry size.  Must be called BEFORE
+// apply_move -- move_promotes inspects the moving piece on its origin square.
+static void ig_record_move(const Move& m) {
+  g_ig_mover_side = g_ig_side;
+  g_ig_path_n = (int)m.path.size();
+  if (g_ig_path_n > 16) g_ig_path_n = 16;
+  for (int i = 0; i < g_ig_path_n; ++i) g_ig_path[i] = m.path[i];
+  g_ig_captured_n = (int)m.captured.size();
+  if (g_ig_captured_n > 16) g_ig_captured_n = 16;
+  for (int i = 0; i < g_ig_captured_n; ++i) g_ig_captured[i] = m.captured[i];
+  g_ig_promoted = move_promotes(g_ig_board, m) ? 1 : 0;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -744,15 +809,7 @@ int ig_pick(int mode, int depth, int q,
   int idx = pick_move(g_ig_board, g_ig_side, mode, depth, q, w, moves, g_ig_rng);
   const Move& m = moves[idx];
 
-  // Record the move for animation (clamp to buffer sizes for safety).
-  g_ig_mover_side = g_ig_side;
-  g_ig_path_n = (int)m.path.size();
-  if (g_ig_path_n > 16) g_ig_path_n = 16;
-  for (int i = 0; i < g_ig_path_n; ++i) g_ig_path[i] = m.path[i];
-  g_ig_captured_n = (int)m.captured.size();
-  if (g_ig_captured_n > 16) g_ig_captured_n = 16;
-  for (int i = 0; i < g_ig_captured_n; ++i) g_ig_captured[i] = m.captured[i];
-  g_ig_promoted = move_promotes(g_ig_board, m) ? 1 : 0;
+  ig_record_move(m);  // snapshot the move for the host to animate (before apply)
 
   bool progress = m.is_jump() || move_promotes(g_ig_board, m);
   apply_move(g_ig_board, g_ig_side, m);
@@ -764,7 +821,8 @@ int ig_pick(int mode, int depth, int q,
   }
 
   g_ig_side = (g_ig_side == RED) ? BLACK : RED;
-  return g_ig_status;  // 0 unless the no-progress cap just triggered
+  ig_detect_terminal();  // does this move leave the opponent with no reply?
+  return g_ig_status;  // 0 unless the no-progress cap or a win just triggered
 }
 
 // Board + move accessors for the host (read after ig_pick / ig_reset).
@@ -847,15 +905,7 @@ int ig_apply(int i, int noProgress, int noProgressCap) {
   if (i < 0 || i >= (int)g_ig_gen.size()) return 4;   // invalid index, no-op
   const Move& m = g_ig_gen[i];
 
-  // Record the move for animation (same as ig_pick).
-  g_ig_mover_side = g_ig_side;
-  g_ig_path_n = (int)m.path.size();
-  if (g_ig_path_n > 16) g_ig_path_n = 16;
-  for (int k = 0; k < g_ig_path_n; ++k) g_ig_path[k] = m.path[k];
-  g_ig_captured_n = (int)m.captured.size();
-  if (g_ig_captured_n > 16) g_ig_captured_n = 16;
-  for (int k = 0; k < g_ig_captured_n; ++k) g_ig_captured[k] = m.captured[k];
-  g_ig_promoted = move_promotes(g_ig_board, m) ? 1 : 0;
+  ig_record_move(m);  // snapshot the move for the host to animate (before apply)
 
   bool progress = m.is_jump() || move_promotes(g_ig_board, m);
   apply_move(g_ig_board, g_ig_side, m);
@@ -865,6 +915,7 @@ int ig_apply(int i, int noProgress, int noProgressCap) {
 
   g_ig_side = (g_ig_side == RED) ? BLACK : RED;
   g_ig_gen.clear();  // move list consumed
+  ig_detect_terminal();  // does this move leave the opponent with no reply?
   return g_ig_status;
 }
 
