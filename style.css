@@ -1,0 +1,934 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: monospace;
+  background: #111;
+  color: #eee;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.75rem 1rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 1.5rem;  /* was 2rem; -25% to pull the panels up */
+}
+
+h1 { font-size: 1.5rem; letter-spacing: 0.05em; }
+
+.subtitle {
+  color: #888;
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  /* Absorb the 0.5rem reclaimed from the header here as bottom slack, so the
+     panels keep their size and the block just shifts up. */
+  margin-bottom: 0.5rem;
+}
+
+/* ------------------------------------------------------------
+   Three-column viewer
+   ------------------------------------------------------------ */
+
+#viewer {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+#leftCol {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex-shrink: 0;
+  width: 300px;
+}
+
+#rightCol {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex-shrink: 0;
+  width: 300px;
+}
+
+/* ------------------------------------------------------------
+   Panel chrome
+   ------------------------------------------------------------ */
+
+.panelTitle {
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid #333;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------
+   Left column panels
+   ------------------------------------------------------------ */
+
+#evalPanel1,
+#evalPanel2 {
+  border: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  font-size: 0.8rem;
+  overflow: hidden;
+}
+
+.evalBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.41rem;  
+  padding: 0.6rem 0.75rem;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #1a1a1a;
+}
+
+.evalBody::-webkit-scrollbar { width: 5px; }
+.evalBody::-webkit-scrollbar-track { background: #1a1a1a; }
+.evalBody::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+/* Eval-panel rows have longer labels ("Opponent Vanguard"). */
+.evalBody .cpRow label {
+  flex: 0 0 104px;
+  font-size: 0.72rem;
+}
+.evalBody .cpRow input[type="range"] {
+  margin-right: 0.4rem;
+}
+
+/* Show the browser's default focus outline whenever a slider is selected
+   (mouse click OR keyboard), not just on keyboard focus.  `revert` restores the
+   user-agent outline that :focus-visible would otherwise suppress for clicks.
+   Clicking elsewhere blurs it, removing the outline automatically. */
+.evalBody .cpRow input[type="range"]:focus {
+  outline: revert;
+}
+
+/* Editable value box for each eval row. */
+.cpNum {
+  flex: 0 0 38px;
+  width: 38px;
+  background: #222;
+  border: 1px solid #555;
+  color: #eee;
+  border-radius: 3px;
+  text-align: right;
+  font-family: monospace;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.2rem;
+}
+.cpNum:disabled { opacity: 0.5; }
+
+/* Hide number-input spinner arrows. */
+.cpNum::-webkit-inner-spin-button,
+.cpNum::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cpNum { -moz-appearance: textfield; appearance: textfield; }
+
+/* Per-row reset button (↺).  Hidden until the row differs from its default
+   (the .offDefault class on the row), so it doubles as the off-default cue.
+   Uses visibility (not display) so the column width stays stable. */
+.rowResetBtn {
+  flex: 0 0 auto;
+  /* Tighten the spacing on either side without changing the box width, keeping
+     left and right equal (~0.35rem each):
+       right = 0.75rem body padding - 0.4rem = 0.35rem to the panel edge
+       left  = 0.4rem row gap     - 0.05rem = 0.35rem to the number box */
+  margin-left: -0.05rem;
+  margin-right: -0.4rem;
+  font-size: 0.72rem;          /* match the number box */
+  padding: 0.1rem 0.3rem;      /* same width/height as before */
+  background: none;
+  border: 1px solid #333;
+  color: #555;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.2;
+  visibility: hidden;
+  transition: color 0.15s, border-color 0.15s;
+}
+.cpRow.offDefault .rowResetBtn { visibility: visible; }
+.rowResetBtn:hover:not(:disabled) { color: #aaa; border-color: #555; background: none; }
+.rowResetBtn:disabled { opacity: 0.35; cursor: default; }
+
+/* Eval-panel title bar: left-justified title + right-aligned tool buttons.
+   Tighter vertical padding than the base .panelTitle to reclaim row height. */
+#evalPanel1 .panelTitle,
+#evalPanel2 .panelTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem 0.2rem 5px;
+  color: #eee;  /* match the active-tab color */
+}
+.panelTitleText {
+  text-align: left;
+  white-space: nowrap;
+}
+.panelTools {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.toolBtn {
+  font-size: 0.6rem;
+  padding: 0.05rem 0.3rem;
+  background: none;
+  border: 1px solid #333;
+  color: #888;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.2;
+  text-transform: none;       /* override panelTitle uppercase */
+  letter-spacing: 0;
+  font-family: monospace;
+  transition: color 0.15s, border-color 0.15s;
+}
+.toolBtn:hover:not(:disabled) { color: #eee; border-color: #555; background: none; }
+.toolBtn:disabled { opacity: 0.35; cursor: default; }
+
+.cpRow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cpRow label {
+  flex: 0 0 90px;
+  color: #aaa;
+}
+
+.cpRow input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: #7af;
+  margin-right: 0.75rem;
+}
+
+.cpRow select {
+  flex: 1;
+  background: #222;
+  border: 1px solid #555;
+  color: #eee;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.25rem;
+  cursor: pointer;
+}
+
+.cpRow span {
+  flex: 0 0 52px;
+  text-align: left;
+  color: #eee;
+}
+
+/* ------------------------------------------------------------
+   Center column — square, height-driven
+   ------------------------------------------------------------ */
+
+#canvasCol {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-shrink: 0;
+  /* width set to match height by JS via --panel-h */
+  width: var(--panel-h, 600px);
+}
+
+#outputPanel {
+  border: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+#outputTabs {
+  display: flex;
+  flex-direction: row;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+#panelCanvas {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  padding: 0.6rem 0.75rem 0;
+  flex: 1;
+  min-height: 0;
+}
+
+#plot {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  /* backing-store size set by JS for crisp rendering */
+}
+
+#outputInner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0.05rem 0.75rem 0.6rem;
+  height: 170px;        /* taller -> shrinks the plot above it */
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+/* ------------------------------------------------------------
+   Test / Play view containers — siblings inside #outputPanel, toggled by the
+   Test/Play tabs.  Each fills the panel below the tab bar.
+   ------------------------------------------------------------ */
+#testView,
+#playView {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------------------------------------
+   Play view: square board canvas above a control strip (mirrors the Test
+   view's plot + control bar).
+   ------------------------------------------------------------ */
+/* The board is bottom-anchored in its area: all of the board's ~5% height slack
+   collects ABOVE the board, so the board's bottom edge sits at a consistent
+   place at any window size.  The control strip then sits a fixed, modest gap
+   below that pinned edge -- centered-looking without any scale-dependent nudge. */
+#boardCanvasWrap {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0.6rem 0.75rem 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The board is square: width follows the available height so it never exceeds
+   the panel.  Sized to 95% so it doesn't crowd the control strip below.  JS
+   sets the backing-store size for crisp rendering. */
+#boardCanvas {
+  height: 95%;
+  max-width: 95%;
+  aspect-ratio: 1 / 1;
+}
+
+/* Control strip block: a fixed gap above and below the single control row, so
+   the strip sits just below the board's (now-pinned) bottom edge. */
+#playInner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  padding: 1rem 1.05rem;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+/* Result line above the controls (winner / draw).  Fixed height so the control
+   strip doesn't shift when the text appears. */
+#playStatus {
+  text-align: center;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: #ddd;
+  height: 1.1rem;
+  line-height: 1.1rem;
+  margin-bottom: 0.4rem;
+}
+
+#playControlBar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+#playControlBar button {
+  padding: 0.35rem 1rem;
+  font-size: 0.85rem;
+}
+
+/* Seat label + dropdown (Red / Black -> EF1 / EF2 / User). */
+.seatLabel {
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+}
+.seatRed { color: #f77; }
+.seatBlack { color: #ccc; }
+
+.seatSelect {
+  background: #222;
+  border: 1px solid #555;
+  color: #eee;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+}
+.seatSelect:focus { outline: revert; }
+.seatSelect:disabled { opacity: 0.4; cursor: default; }
+
+/* EF-value readout flanking the seat dropdowns: "(EF1(state) = 0.50) (+0.12)".
+   First field (.efVal) is calm gray; the delta (.efDelta) is color-coded and
+   flashes bold when a move changes it. */
+.efReadout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: monospace;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+.efReadout:empty { display: none; }
+.efVal { color: #888; }
+.efDelta { display: inline-block; }
+.efNeutral { color: #888; }
+.efPos { color: #6cc06c; }   /* value rose for this EF */
+.efNeg { color: #f77; }      /* value fell for this EF */
+
+.efFlash { font-weight: bold; animation: efPulse 0.45s ease; }
+@keyframes efPulse {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+
+/* The stats block fills the space between the plot legend (above) and the
+   control bar (below).  Its four text lines are vertically centered, with an
+   hrule centered in the gap above and below them. */
+#statsBlock {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Equal-height gap zones above and below the text, each centering its rule at
+   its own midpoint -- so both rules are centered in their respective gaps even
+   if the surrounding padding is asymmetric. */
+.statsGap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 25%-width rule, same style as panel outlines. */
+.statsRule {
+  width: 25%;
+  height: 0;
+  border: none;
+  border-top: 1px solid #333;
+  margin: 0;
+}
+
+/* The text group takes its natural height between the two gap zones.  Tighter
+   gap now that it holds an extra (move-time) line. */
+#statsText {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+#counters {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 2rem;
+}
+
+.counter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.counterLabel {
+  font-size: 0.65rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Percentage sits above the raw count, same font/color, just larger emphasis. */
+.counterPct {
+  font-size: 1.1rem;
+  color: #eee;
+}
+
+.counterVal {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.counterEf1 { color: #7af; }  /* matches #1 plot line */
+.counterEf2 { color: #f77; }  /* matches #2 plot line */
+/* keep raw-count line muted even when tinted */
+.counterVal.counterEf1 { color: #5688bb; }
+.counterVal.counterEf2 { color: #bb6666; }
+
+#progress {
+  color: #aaa;
+  font-size: 0.9rem;
+  min-height: 1.2em;
+}
+
+/* Per-EF average move-time line, dimmer/smaller than the progress line. */
+#moveTimes {
+  color: #777;
+  font-size: 0.78rem;
+  min-height: 1.1em;
+}
+
+/* ------------------------------------------------------------
+   Control bar — Controls: [Play/Pause] [Stop] • Setup: [...]
+   ------------------------------------------------------------ */
+
+#controlBar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.ctrlGroup {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ctrlGroupLabel {
+  font-size: 0.7rem;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ctrlDivider {
+  color: #444;
+  font-size: 0.9rem;
+}
+
+#controlBar button {
+  padding: 0.35rem 1rem;
+  font-size: 0.85rem;
+}
+
+.ctrlField {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: #aaa;
+}
+
+.ctrlField input[type="number"] {
+  width: 56px;
+  background: #222;
+  border: 1px solid #555;
+  color: #eee;
+  border-radius: 3px;
+  text-align: center;
+  font-family: monospace;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.25rem;
+}
+
+/* Hide the number-field spinner arrows. */
+.ctrlField input[type="number"]::-webkit-inner-spin-button,
+.ctrlField input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.ctrlField input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.ctrlField input[type="checkbox"] {
+  accent-color: #7af;
+  width: 14px;
+  height: 14px;
+}
+
+.ctrlField input[type="range"] {
+  width: 80px;
+  accent-color: #7af;
+}
+
+.ctrlSlider #coresVal,
+.ctrlSlider #moveSpeedVal,
+.ctrlSlider #turnGapVal {
+  color: #eee;
+  min-width: 2.2em;
+  text-align: left;
+}
+
+/* Disabled setup controls during a run. */
+.ctrlField input:disabled { opacity: 0.4; cursor: default; }
+.ctrlField.disabled { opacity: 0.5; }
+
+/* ------------------------------------------------------------
+   Right column — info panel
+   ------------------------------------------------------------ */
+
+#infoPanel {
+  border: 1px solid #333;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+}
+
+#infoTabs {
+  display: flex;
+  flex-direction: row;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.infoInner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem;
+  color: #aaa;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #1a1a1a;
+}
+
+.infoInner::-webkit-scrollbar { width: 5px; }
+.infoInner::-webkit-scrollbar-track { background: #1a1a1a; }
+.infoInner::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+.infoInner h3 {
+  font-size: 0.75rem;
+  color: #7af;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.infoInner h3:first-child { margin-top: 0; }
+
+.infoInner h4 {
+  font-size: 0.78rem;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  color: #ccc;
+  margin: 0.6rem 0 0.2rem;
+}
+
+.infoInner p {
+  font-size: 0.78rem;
+  margin-bottom: 0.5rem;
+}
+
+.infoInner a {
+  color: #7af;
+  text-decoration: none;
+}
+
+.infoInner a:hover { text-decoration: underline; }
+
+.infoInner dl { margin: 0 0 0.25rem; }
+
+.infoInner dt {
+  font-size: 0.78rem;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  color: #ccc;
+  margin-top: 0.5rem;
+}
+
+.infoInner dd {
+  font-size: 0.75rem;
+  color: #888;
+  margin: 0.1rem 0 0 0.75rem;
+}
+
+.infoInner dd em {
+  color: #666;
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------
+   Logs (run history) — rendered into #logsInner (.infoInner scroll area)
+   ------------------------------------------------------------ */
+
+/* Drop the container padding so the sticky header sits flush; rows and the
+   empty message carry their own horizontal padding instead. */
+#logsInner { padding: 0; }
+
+/* Sticky header with the Clear button, pinned to the top of the scroll area. */
+#logHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #333;
+  position: sticky;
+  top: 0;
+  background: #111;
+  z-index: 1;
+}
+#logHeader span {
+  font-size: 0.7rem;
+  color: #555;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+}
+#clearLogBtn {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #666;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+#clearLogBtn:hover { color: #aaa; border-color: #555; background: #1a1a1a; }
+
+.logEmpty {
+  color: #666;
+  font-size: 0.78rem;
+  font-style: italic;
+  padding: 0.6rem 0.75rem;
+}
+
+.logRow {
+  border-bottom: 1px solid #222;
+  padding: 0.4rem 0.75rem;
+}
+
+.logRowHead {
+  display: flex;
+  align-items: flex-start;  /* chevron + delete align to the first line */
+  gap: 0.4rem;
+}
+
+.logChevron {
+  flex-shrink: 0;
+  background: none !important;
+  border: none;
+  color: #777;
+  font-size: 2.1rem;       /* 3x the original glyph */
+  line-height: 1;
+  padding: 0 !important;
+  width: 1.6rem;           /* fixed box so the summary text isn't squeezed */
+  margin-top: -0.55rem;    /* pull the tall glyph up to the first text line */
+  cursor: pointer;
+  transition: transform 0.12s, color 0.15s;
+}
+.logChevron:hover { color: #aaa; }
+.logRow.open .logChevron { transform: rotate(90deg); }
+
+/* Three stacked lines: EF1 descriptor / EF2 descriptor / outcome percentages. */
+.logMatchup {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72rem;
+}
+
+.logDescLine {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.logEf1 { color: #7af; }
+.logEf2 { color: #f77; }
+
+.logLive {
+  margin-left: 0.4rem;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8a8;
+}
+
+.logPcts {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.15rem;
+}
+.logPct { font-size: 0.66rem; }
+.logPctEf1 { color: #7af; }
+.logPctDraw { color: #888; }
+.logPctEf2 { color: #f77; }
+
+.logDel {
+  flex-shrink: 0;
+  background: none !important;
+  border: none;
+  color: #666;
+  font-size: 1.8rem;       /* 2x the original glyph */
+  line-height: 1;
+  padding: 0 0.2rem !important;
+  margin-top: -0.4rem;     /* pull the tall glyph up to the first text line */
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.logDel:hover:not(:disabled) { color: #f77; }
+.logDel:disabled { opacity: 0.3; cursor: default; }
+
+.logDetail {
+  padding: 0.4rem 0 0.2rem 1rem;
+}
+
+.logMeta {
+  font-size: 0.66rem;
+  color: #888;
+  margin-bottom: 0.4rem;
+}
+
+.logCols {
+  display: flex;
+  gap: 0.2875rem;  /* 0.6rem minus ~5px @1080p, to ease 4k/200% scaling overflow */
+}
+
+.logCol {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #222;
+  border-radius: 3px;
+  padding: 0.3rem 0.4rem;
+}
+
+.logColHdr {
+  font-size: 0.66rem;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  color: #ccc;
+  margin-bottom: 0.2rem;
+}
+
+.logColAvg {
+  font-size: 0.62rem;
+  color: #888;
+  margin-bottom: 0.3rem;
+}
+
+.logSettings { margin: 0; }
+
+.logSetRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.66rem;
+}
+.logSetRow dt { color: #aaa; margin: 0; }
+.logSetRow dd { color: #ccc; margin: 0; }
+
+.logDiff {
+  background: rgba(122, 170, 255, 0.10);
+  border-radius: 2px;
+}
+.logDiff dt { color: #cda; }
+.logDiff dd { color: #eed; }
+
+.logColBtns {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+/* ------------------------------------------------------------
+   Tabs (shared)
+   ------------------------------------------------------------ */
+
+.tabBtn {
+  background: none !important;
+  border: none;
+  border-left: 1px solid #333;
+  border-bottom: 1px solid #333;
+  border-radius: 0;
+  color: #666;
+  font-size: 0.75rem;
+  font-family: monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.35rem 0.75rem !important;
+  cursor: pointer;
+  transition: color 0.15s;
+  margin-bottom: -1px;
+}
+
+.tabBtn:last-child {
+  border-right: 1px solid #333;
+}
+
+.tabBtn:hover:not(:disabled) {
+  background: none !important;
+  color: #aaa;
+}
+
+.tabBtn.active {
+  color: #eee;
+  border-bottom: 1px solid #111;
+}
+
+/* ------------------------------------------------------------
+   Buttons
+   ------------------------------------------------------------ */
+
+button {
+  background: #222;
+  color: #eee;
+  border: 1px solid #555;
+  padding: 0.5rem 1.5rem;
+  font-family: monospace;
+  font-size: 0.95rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button:hover:not(:disabled) { background: #333; }
+button:disabled { opacity: 0.35; cursor: default; }

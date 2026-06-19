@@ -1,0 +1,13 @@
+# Personal / local Claude Code settings
+.claude/
+
+# Dependencies (local dev server etc.)
+node_modules/
+
+# Temporary test scaffolding (named _*.js by convention)
+_*.js
+
+# OS / editor / OneDrive cruft
+.DS_Store
+Thumbs.db
+desktop.ini

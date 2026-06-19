@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkers Evaluation Function Explorer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Checkers Evaluation Function Explorer</h1>
+    <p class="subtitle">Design and Test Heuristic Evaluation Functions for Minimax Search</p>
+  </header>
+
+  <main>
+    <div id="viewer">
+      <div id="leftCol">
+        <div id="evalPanel1">
+          <div class="panelTitle">
+            <span class="panelTitleText">Eval Func 1</span>
+            <span class="panelTools">
+              <button class="toolBtn" id="ef1Copy" title="Copy these settings to Eval Func 2">Copy 1 → 2</button>
+              <button class="toolBtn" id="ef1Save" title="Save settings to a JSON file">Save</button>
+              <button class="toolBtn" id="ef1Load" title="Load settings from a JSON file">Load</button>
+              <button class="toolBtn" id="ef1ResetAll" title="Reset all to defaults">↺</button>
+            </span>
+          </div>
+          <div class="evalBody" id="ef1Body"></div>
+        </div>
+        <div id="evalPanel2">
+          <div class="panelTitle">
+            <span class="panelTitleText">Eval Func 2</span>
+            <span class="panelTools">
+              <button class="toolBtn" id="ef2Copy" title="Copy these settings to Eval Func 1">Copy 2 → 1</button>
+              <button class="toolBtn" id="ef2Save" title="Save settings to a JSON file">Save</button>
+              <button class="toolBtn" id="ef2Load" title="Load settings from a JSON file">Load</button>
+              <button class="toolBtn" id="ef2ResetAll" title="Reset all to defaults">↺</button>
+            </span>
+          </div>
+          <div class="evalBody" id="ef2Body"></div>
+        </div>
+        <input type="file" id="evalFileInput" accept="application/json,.json" style="display:none;">
+      </div>
+
+      <div id="canvasCol">
+        <div id="outputPanel">
+          <div id="outputTabs">
+            <button class="tabBtn active" id="tabTest">Test</button>
+            <button class="tabBtn" id="tabPlay">Play</button>
+          </div>
+          <!-- Test view: win/draw/loss plot + run stats + run controls. -->
+          <div id="testView">
+            <div id="panelCanvas">
+              <canvas id="plot"></canvas>
+            </div>
+            <div id="outputInner">
+              <div id="statsBlock">
+                <div class="statsGap"><hr class="statsRule"></div>
+                <div id="statsText">
+                  <div id="counters">
+                    <div class="counter">
+                      <span class="counterLabel">#1 Wins</span>
+                      <span class="counterPct counterEf1" id="ef1PctVal">—</span>
+                      <span class="counterVal counterEf1" id="ef1WinsVal">0</span>
+                    </div>
+                    <div class="counter">
+                      <span class="counterLabel">Draws</span>
+                      <span class="counterPct" id="drawsPctVal">—</span>
+                      <span class="counterVal" id="drawsVal">0</span>
+                    </div>
+                    <div class="counter">
+                      <span class="counterLabel">#2 Wins</span>
+                      <span class="counterPct counterEf2" id="ef2PctVal">—</span>
+                      <span class="counterVal counterEf2" id="ef2WinsVal">0</span>
+                    </div>
+                  </div>
+                  <p id="progress"></p>
+                  <p id="moveTimes"></p>
+                </div>
+                <div class="statsGap"><hr class="statsRule"></div>
+              </div>
+
+              <div id="controlBar">
+                <div class="ctrlGroup">
+                  <span class="ctrlGroupLabel">Controls:</span>
+                  <button id="startPauseBtn" disabled>Start</button>
+                  <button id="stopBtn" disabled>Stop</button>
+                </div>
+                <span class="ctrlDivider">•</span>
+                <div class="ctrlGroup">
+                  <span class="ctrlGroupLabel">Setup:</span>
+                  <label class="ctrlField">
+                    <span>N Games</span>
+                    <input type="number" id="nGamesInput" min="1" step="1" value="1000">
+                  </label>
+                  <span class="ctrlDivider">•</span>
+                  <label class="ctrlField ctrlCheck">
+                    <span>Random Rollouts</span>
+                    <input type="checkbox" id="rolloutChk" checked>
+                  </label>
+                  <span class="ctrlDivider">•</span>
+                  <label class="ctrlField ctrlSlider">
+                    <span>Cores</span>
+                    <input type="range" id="coresSlider" min="1" step="1">
+                    <span id="coresVal">—</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Play view: interactive board + side role assignment.  Layout only
+               for now; agent/user move logic comes next. -->
+          <div id="playView" style="display:none;">
+            <div id="boardCanvasWrap">
+              <canvas id="boardCanvas"></canvas>
+            </div>
+            <div id="playInner">
+              <div id="playStatus"></div>
+              <div id="playControlBar">
+                <div class="ctrlGroup">
+                  <span class="efReadout" id="redEval"></span>
+                  <label class="ctrlField">
+                    <span class="seatLabel seatRed">Red</span>
+                    <select id="redSeat" class="seatSelect">
+                      <option value="ef1">EF1</option>
+                      <option value="ef2">EF2</option>
+                      <option value="user" selected>User</option>
+                    </select>
+                  </label>
+                  <span class="ctrlDivider">•</span>
+                  <label class="ctrlField">
+                    <span class="seatLabel seatBlack">Black</span>
+                    <select id="blackSeat" class="seatSelect">
+                      <option value="ef1" selected>EF1</option>
+                      <option value="ef2">EF2</option>
+                      <option value="user">User</option>
+                    </select>
+                  </label>
+                  <span class="efReadout" id="blackEval"></span>
+                </div>
+                <div class="ctrlGroup">
+                  <button id="playStartBtn" disabled>Play</button>
+                  <button id="playStepBtn" disabled>Step</button>
+                  <button id="playResetBtn" disabled>Reset</button>
+                  <label class="ctrlField ctrlSlider">
+                    <span>Move Speed</span>
+                    <input type="range" id="moveSpeedSlider" min="0.1" max="2" step="0.1" value="0.5">
+                    <span id="moveSpeedVal">0.5s</span>
+                  </label>
+                  <label class="ctrlField ctrlSlider">
+                    <span>Turn Gap</span>
+                    <input type="range" id="turnGapSlider" min="0.1" max="2" step="0.1" value="0.5">
+                    <span id="turnGapVal">0.5s</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="rightCol">
+        <div id="infoPanel">
+          <div id="infoTabs">
+            <button class="tabBtn active" id="tabAbout">About</button>
+            <button class="tabBtn" id="tabHowTo">How To</button>
+            <button class="tabBtn" id="tabLogs">Logs</button>
+          </div>
+          <div id="aboutInner" class="infoInner">
+            <h3>Overview</h3>
+            <p>This is a sandbox for designing and testing <em>heuristic evaluation functions</em> for depth-limited <a href="https://en.wikipedia.org/wiki/Minimax" target="_blank">minimax</a> search, using <a href="https://en.wikipedia.org/wiki/Checkers" target="_blank">checkers</a> as a test case. These functions allow the algorithm to make an educated guess about how the game is going for a player. Using the panels to the left, the user can decide how different factors contribute to this guess.</p>
+
+            <p>This tool allows users to practice a core computer science skill: <em>taking something they understand intuitively (e.g., how to evaluate a position in checkers) and making it precise enough for a computer to use.</em></p>
+
+            <h3>How It Works</h3>
+            <h4>Evaluation Functions</h4>
+            <p>An evaluation function takes a board position and returns a single number — higher is better for the side to move. The minimax algorithm simulates different ways the game could play out over a fixed number of future turns (determined by its depth limit) and uses its evaluation function to score the resulting board positions. Using these scores (and the assumption that both players are trying to maximize their own advantage), minimax selects whichever action seems best.</p>
+            <p>Unfortunately, there are simply too many different ways a game could play out from start to finish, so a shallow depth limit is often the only practical option. This means that the algorithm will usually have to rely on the guesses supplied by its evaluation function instead of actual outcomes (i.e., win, lose, or draw). For this reason, the quality of these guesses is critical to success.</p>
+            <p>To see how minimax explores different ways a game could go, see this <a href="https://tmillhouua.github.io/MinimaxVisualizerTTT/" target="_blank">visualization</a>.</p>
+            <h4>The Weighted Feature Sum</h4>
+            <p>Each evaluation function here is a weighted sum of board <em>features</em> — pieces, kings, mobility, and so on. Every feature carries a weight: a positive weight rewards it, a negative weight penalizes it. "Player" features describe the player's side; "Enemy" features describe the opponent's side. Designing a function means choosing which features matter and by how much. <em>Explanations of each feature can be found in the "How To" tab.</em></p>
+            <h4>Test and Play</h4>
+            <p>You define two functions, EF1 and EF2. The "Test" tab plays many games between them in parallel and charts the win / draw / loss proportions as they accumulate — a fast way to tell whether a change actually helped. The "Play" tab runs a single game you can watch or join: assign each color to a function or to yourself, and follow it move by move.</p>
+            <h4>Reading the Score</h4>
+            <p>On the "Play" tab, the <em>EF(state)</em> readout beside each agent shows its score of the current position (from its own side) and how that score changed on the last move. Pause and nudge a weight to watch the score respond — a concrete illustration of how your formula judges a position. <em>Evaluation functions cannot be edited during a game unless it is first paused.</em></p>
+
+            <h3>A Note on Weights</h3>
+            <p>The <em>relative</em> sizes of the weights are what encode a value system. A weight set larger than the weight on one's pieces tends to backfire. Minimax will trade away pieces to chase it, and an advantage on a single feature is rarely worth such a sacrifice. Start with small weights and tweak them up and down. Keeping feature weights small lets them break ties between otherwise equal positions without overwhelming other features.</p>
+          </div>
+          <div id="howToInner" class="infoInner" style="display:none;">
+            <h3>Test Controls</h3>            
+            <dl>
+              <dt>Start / Pause</dt>
+              <dd>Begins a new run of games. Click again to pause. Click once more to resume. </dd>
+              <dt>Stop</dt>
+              <dd>Ends the current run, leaving its results on screen.</dd>
+              <dt>N Games</dt>
+              <dd>How many games to play in a run.</dd>
+              <dt>Random Rollouts</dt>
+              <dd>Opens each game with 1-2 random moves per side. <em>Increases diversity of games sampled — essential when agents are deterministic.</em></dd>
+              <dt>Cores</dt>
+              <dd>How many games run in parallel, one per worker thread. <em>Increasing cores will shorten runs but reduce performance on other tasks.</em></dd>
+            </dl>
+
+            <h3>Play Controls</h3>            
+            <dl>
+              <dt>Red / Black</dt>
+              <dd>Assigns each side to EF1, EF2, or User (you). Red moves first.</dd>
+              <dt>Play / Play Again / Pause / Resume</dt>
+              <dd>Play/Play Again starts a new game. Pause halts it and unlocks evaluation functions for editing; Resume continues with changes applied.</dd>
+              <dt>Step</dt>
+              <dd>Plays exactly one move, then pauses. <em>Agent-vs-agent games only.</em></dd>
+              <dt>Reset</dt>
+              <dd>Stops current game and returns board to opening position.</dd>
+              <dt>Move Speed</dt>
+              <dd>How long a piece takes to slide to its destination.</dd>
+              <dt>Turn Gap</dt>
+              <dd>The pause between one move and the next.</dd>
+              <dt>Moving a piece (User)</dt>
+              <dd>Click a glowing piece to select it, then click a highlighted square to move there; jumps preview their full path. <em>When a capture is available, only capturing moves are offered.</em></dd>              
+            </dl>
+
+            <h3>EF Controls</h3>            
+            <dl>
+              <dt>Depth</dt>
+              <dd>How many moves ahead the search looks. <em>Deeper play is stronger but slower.</em></dd>
+              <dt>Quiescence</dt>
+              <dd>Extra search past the depth limit that waits (up to this many moves) for pieces to be out of danger. <em>Helps prevent search from stopping in the middle of an exchange.</em></dd>
+              <dt>Player / Enemy Pieces</dt>
+              <dd>The number of pieces each side has, including both men and kings.</dd>
+              <dt>Player / Enemy Kings</dt>
+              <dd>The number of kings each side has.</dd>
+              <dt>Player / Enemy Vanguard</dt>
+              <dd>Pieces in the half of the board nearest the opponent.</dd>
+              <dt>Player / Enemy At Risk</dt>
+              <dd>Pieces the opponent could capture on the next move.</dd>
+              <dt>Player / Enemy Mobility</dt>
+              <dd>How freely each side can move, summed per piece as the fraction of its possible moves that are open. <em>A man has 2 possible moves, a king 4; so a king with 3 open scores 0.75.</em></dd>
+              <dt>Player / Enemy Back Row</dt>
+              <dd>Pieces still on their own back row. <em>These are the squares the opponent must reach to make a king.</em></dd>              
+              <dt>Copy x → y / Save / Load / ↺ </dt>
+              <dd>Copy settings to other function; export as JSON file; import from JSON file; reset to defaults.</dd>
+            </dl>
+            
+          </div>
+          <div id="logsInner" class="infoInner" style="display:none;">
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- engine.js is loaded inside each worker (see worker.js), not here. -->
+  <script src="coordinator.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Keep shell scripts LF so build.sh stays runnable under WSL/bash.
+*.sh text eol=lf
+
+# Treat the WASM binary as binary (no line-ending or diff munging).
+*.wasm binary
