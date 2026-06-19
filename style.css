@@ -121,12 +121,14 @@ main {
   margin-right: 0.4rem;
 }
 
-/* Show the browser's default focus outline whenever a slider is selected
-   (mouse click OR keyboard), not just on keyboard focus.  `revert` restores the
-   user-agent outline that :focus-visible would otherwise suppress for clicks.
-   Clicking elsewhere blurs it, removing the outline automatically. */
+/* Show a focus outline whenever a slider is selected (mouse click OR keyboard),
+   not just on keyboard focus.  `outline: auto` forces the user-agent focus ring
+   on ANY :focus.  (An earlier `outline: revert` failed: the browser only draws
+   the ring under :focus-visible, which a mouse click does NOT trigger, so
+   reverting left no outline until a key was pressed.)  Clicking elsewhere blurs
+   the slider, removing the outline automatically. */
 .evalBody .cpRow input[type="range"]:focus {
-  outline: revert;
+  outline: auto;
 }
 
 /* Editable value box for each eval row. */
@@ -399,7 +401,9 @@ main {
   padding: 0.25rem 0.4rem;
   cursor: pointer;
 }
-.seatSelect:focus { outline: revert; }
+/* outline: auto (not revert) so the ring shows on mouse click too, not only
+   keyboard focus -- see the slider note above. */
+.seatSelect:focus { outline: auto; }
 .seatSelect:disabled { opacity: 0.4; cursor: default; }
 
 /* EF-value readout flanking the seat dropdowns: "(EF1(state) = 0.50) (+0.12)".
@@ -599,6 +603,11 @@ main {
 .ctrlField input[type="range"] {
   width: 80px;
   accent-color: #7af;
+}
+/* Same as the eval sliders: show the focus ring on mouse click, not just
+   keyboard focus (outline: auto, not the UA-default :focus-visible). */
+.ctrlField input[type="range"]:focus {
+  outline: auto;
 }
 
 .ctrlSlider #coresVal,
